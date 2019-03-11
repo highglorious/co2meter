@@ -19,6 +19,8 @@
 #define SENSOR_SERIAL swSer
 #define I2C_SDA 5 // D1
 #define I2C_SCL 4 // D2
+#define LED_L 2
+#define LED_R 16
 
 byte cmd[9] = {0xFF, 0x01, 0x86, 0x00, 0x00, 0x00, 0x00, 0x00, 0x79};
 byte abcon[9] = {0xFF, 0x01, 0x79, 0xA0, 0x00, 0x00, 0x00, 0x00, 0xE6};
@@ -44,10 +46,14 @@ Adafruit_BMP280 bme;
 U8G2_SSD1306_128X64_NONAME_F_SW_I2C u8g2(U8G2_R0, I2C_SCL, I2C_SDA, U8X8_PIN_NONE);
 SoftwareSerial swSer(13, 15, false, 256); // GPIO15 (TX) and GPIO13 (RX)
 WidgetTerminal terminal(V5);
+WidgetLCD lcd(V6);
 
-float t = 99;
+float t1 = -1;
+float t2 = -1;
+float t = -1;
 int p = -1;
-int h = 99;
+int a = -1;
+int h = -1;
 int co2 = -1;
 
 char loader[4]{'.'};
@@ -114,25 +120,51 @@ void readCarbonDioxide()
 void getSensors()
 {
         // TEMP
-        float tf = myHTU21D.readTemperature();
+        float tf1 = myHTU21D.readTemperature();
+        //BLYNK_LOG("DEBUG:Temperature HTU21D: %f", tf1);
+        float tf = tf1;
+        tf1 = floor(tf1 * 10);
+        t1 = tf1 / 10;
+        BLYNK_LOG("Temperature HTU21D: %.1f C", t1);
+        // PRESSURE
+        float tf2 = bme.readTemperature();
+        //BLYNK_LOG("DEBUG:Temperature BME280: %f", tf2);
+        tf += tf2;
+        tf2 = floor(tf2 * 10);
+        t2 = tf2 / 10;
+        BLYNK_LOG("Temperature BME280: %.1f C", t2);
+        tf /= 2;
         tf = floor(tf * 10);
         t = tf / 10;
-        BLYNK_LOG("Temperature: %.1f C", t);
+        BLYNK_LOG("Temperature avg: %.1f C", t);
+        float pf = bme.readPressure();
+        //BLYNK_LOG("DEBUG:Pressure: %f Pa", pf);
+        BLYNK_LOG("Pressure: %.0f hPa", pf/100);
+        pf = pf * 760 / 101325;
+        p = floor(pf);
+        BLYNK_LOG("Pressure: %d mmHg", p);
+        float af = bme.readAltitude();
+        af = floor(af * 10);
+        a = af / 10;
+        BLYNK_LOG("Altitude: %d m", a);
         // HUMIDITY
         float hf = myHTU21D.readCompensatedHumidity();
         h = round(hf);
         BLYNK_LOG("Humidity: %d %%", h);
-        // PRESSURE
-        // BLYNK_LOG("Pressure: %d mmHg", p);
+
         // CO2
         readCarbonDioxide();
-        //BLYNK_LOG("CO2: %d ppm", co2);
 
         // Send to server
         Blynk.virtualWrite(V1, t);
         Blynk.virtualWrite(V2, h);
         Blynk.virtualWrite(V3, p);
         Blynk.virtualWrite(V4, co2);
+        // V5 - terminal
+        // V6 - LCD
+        Blynk.virtualWrite(V7, t1);
+        Blynk.virtualWrite(V8, t2);
+        Blynk.virtualWrite(V9, a);
 }
 
 void drawLoading()
@@ -293,8 +325,12 @@ BLYNK_WRITE(V5)
         {
                 //terminal.clear();
                 //terminal.println("Sensors-->");
-                terminal.printf("Temp: %.1fC \n", t);
+                terminal.printf("Temp AVG: %.1fC \n", t);
+                terminal.printf("Temp HTU21: %.1fC \n", t1);
+                terminal.printf("Temp BME280: %.1fC \n", t2);
                 terminal.printf("RH: %d%% \n", h);
+                terminal.printf("Pressure: %dmmHg \n", p);
+                terminal.printf("Altitude: %dm \n", a);
                 terminal.printf("co2: %dppm \n", co2);
         }
         else
@@ -310,6 +346,10 @@ BLYNK_WRITE(V5)
 
 void setup()
 {
+        pinMode(LED_L, OUTPUT);
+        pinMode(LED_R, OUTPUT);
+        digitalWrite(LED_L, HIGH);
+        digitalWrite(LED_R, HIGH);
 
         Serial.begin(9600);
         SENSOR_SERIAL.begin(9600);
@@ -327,7 +367,7 @@ void setup()
         {
                 BLYNK_LOG("HTU21D sensor OK!");
         }
-        if (!bme.begin())
+        if (!bme.begin(0x76))
         {
                 BLYNK_LOG("Could not find a valid BMP280 sensor, check wiring!");
         }
